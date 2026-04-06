@@ -1,0 +1,15 @@
+# 若 Git 仓库根目录为本仓库的上一级（MP4ToFrameTwo），请优先遵循根目录 `.gitignore`。
+# 若仅将本目录 `MP4ToFrame` 作为独立仓库克隆，下列规则可避免提交构建产物与本地配置：
+
+bin/
+obj/
+.vs/
+publish/
+*.user
+*.suo
+*.pfx
+
+# 本地下载的 FFmpeg，勿提交
+ffmpeg.exe
+ffprobe.exe
+ffplay.exe
