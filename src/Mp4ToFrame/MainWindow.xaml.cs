@@ -12,6 +12,7 @@ public partial class MainWindow : Window
 {
     AppSettings _settings = new();
     bool _uiReady;
+    bool _uiBusy;
     FileSystemWatcher? _videoFolderWatcher;
     string? _videoWatcherWorkspaceRoot;
     readonly DispatcherTimer _videoListDebounce;
@@ -189,7 +190,7 @@ public partial class MainWindow : Window
 
     void UpdateErodePanel()
     {
-        PanelErode.IsEnabled = ChkAlphaMatting.IsChecked == true;
+        PanelErode.IsEnabled = ChkAlphaMatting.IsChecked == true && !_uiBusy;
     }
 
     void RefreshWorkspaceUi(int? selectVideoIndex)
@@ -717,6 +718,7 @@ public partial class MainWindow : Window
 
     void SetBusy(bool busy)
     {
+        _uiBusy = busy;
         ProgressIndeterminate.IsIndeterminate = busy;
         ProgressIndeterminate.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         var root = TxtWorkspace.Text.Trim();
@@ -745,7 +747,6 @@ public partial class MainWindow : Window
         ComboModel.IsEnabled = !busy;
         TxtCustomModel.IsEnabled = !busy;
         ChkAlphaMatting.IsEnabled = !busy;
-        SliderErode.IsEnabled = !busy && ChkAlphaMatting.IsChecked == true;
         ChkPostProcess.IsEnabled = !busy;
         ComboRembgParallel.IsEnabled = !busy;
         TxtFinalWidth.IsEnabled = !busy;
@@ -759,6 +760,7 @@ public partial class MainWindow : Window
         TxtFinalBorderFillArgb.IsEnabled = !busy;
         BtnDownloadFfmpeg.IsEnabled = !busy && ResolveFfmpegPath() == null;
         BtnWingetFfmpeg.IsEnabled = !busy && FfmpegInstaller.FindWingetPath() != null;
+        UpdateErodePanel();
     }
 
     static bool TryParseBorderInt(string? s, out int v)
