@@ -6,6 +6,8 @@ public static class WorkspaceLayout
     public const string VideoFolderName = "Video";
     public const string FrameFolderName = "Frame";
     public const string MattedFolderName = "Matted";
+    /// <summary>Matted 缩放后的最终输出目录（工作路径下）。</summary>
+    public const string FinalExportFolderName = "Final";
     const string LegacyVideoMisspelling = "Vedio";
 
     public static string VideoDir(string workspaceRoot) =>
@@ -16,6 +18,9 @@ public static class WorkspaceLayout
 
     public static string MattedDir(string workspaceRoot) =>
         Path.GetFullPath(Path.Combine(workspaceRoot, MattedFolderName));
+
+    public static string FinalExportDir(string workspaceRoot) =>
+        Path.GetFullPath(Path.Combine(workspaceRoot, FinalExportFolderName));
 
     public static void FixLegacyNamesAndEnsureFolders(string workspaceRoot)
     {
@@ -46,6 +51,22 @@ public static class WorkspaceLayout
         return Directory.GetFiles(frame, "*.png", SearchOption.TopDirectoryOnly).Length > 0
                || Directory.GetFiles(frame, "*.jpg", SearchOption.TopDirectoryOnly).Length > 0
                || Directory.GetFiles(frame, "*.jpeg", SearchOption.TopDirectoryOnly).Length > 0;
+    }
+
+    public static bool HasMattedImages(string workspaceRoot)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceRoot) || !Directory.Exists(workspaceRoot))
+            return false;
+        var m = MattedDir(workspaceRoot);
+        if (!Directory.Exists(m))
+            return false;
+        foreach (var ext in new[] { "*.png", "*.jpg", "*.jpeg" })
+        {
+            if (Directory.GetFiles(m, ext, SearchOption.TopDirectoryOnly).Length > 0)
+                return true;
+        }
+
+        return false;
     }
 
     public static string[] ListMp4InVideo(string workspaceRoot)

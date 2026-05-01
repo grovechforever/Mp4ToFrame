@@ -9,6 +9,13 @@ public sealed class AppSettings
     public int Height { get; set; } = 1080;
     public double TargetFps { get; set; } = 30;
     public bool MirrorHorizontally { get; set; }
+    /// <summary>左/右/上/下：正=向内裁切像素，负=向外扩展像素（填充见 BorderFillArgb）。</summary>
+    public int BorderLeft { get; set; }
+    public int BorderRight { get; set; }
+    public int BorderTop { get; set; }
+    public int BorderBottom { get; set; }
+    /// <summary>外扩区域填充色 ARGB；A=0 为透明（默认 0）。</summary>
+    public uint BorderFillArgb { get; set; }
     public string? RembgPath { get; set; }
     public string? FfmpegPath { get; set; }
     public int RembgModelIndex { get; set; }
@@ -16,6 +23,19 @@ public sealed class AppSettings
     public bool RembgAlphaMatting { get; set; }
     public int RembgAlphaErode { get; set; } = 4;
     public bool RembgPostProcessMask { get; set; }
+    /// <summary>rembg 并行进程数（1–8），大于 1 时多进程分批抠图。</summary>
+    public int RembgParallelJobs { get; set; } = 1;
+    /// <summary>Matted → 最终导出的目标宽高（FFmpeg 等比缩放 + 透明边）。</summary>
+    public int FinalExportWidth { get; set; } = 1920;
+    public int FinalExportHeight { get; set; } = 1080;
+    /// <summary>最终导出目录；空则使用工作路径下的 Final 文件夹。</summary>
+    public string FinalExportOutputFolder { get; set; } = "";
+    /// <summary>最终导出 Border（与视频抽帧 Border 语义相同）。</summary>
+    public int FinalBorderLeft { get; set; }
+    public int FinalBorderRight { get; set; }
+    public int FinalBorderTop { get; set; }
+    public int FinalBorderBottom { get; set; }
+    public uint FinalBorderFillArgb { get; set; }
     public int SelectedVideoIndex { get; set; }
 }
 

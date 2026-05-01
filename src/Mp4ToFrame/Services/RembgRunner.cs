@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -6,6 +7,8 @@ namespace Mp4ToFrame.Services;
 
 public static class RembgRunner
 {
+    static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg"];
+
     public sealed class Options
     {
         public string InputFolder = "";
@@ -15,9 +18,12 @@ public static class RembgRunner
         public bool AlphaMatting;
         public int AlphaMattingErodeSize = 4;
         public bool PostProcessMask;
+        /// <summary>并行启动的 rembg 进程数（1=与官方 CLI 相同，顺序处理）。大于 1 时将图片分到多个子文件夹并行跑 rembg p，可明显缩短总墙钟时间（内存与 CPU 占用上升）。</summary>
+        public int ParallelJobs { get; set; } = 1;
     }
 
-    public static async Task RunFolderAsync(Options opt, CancellationToken cancellationToken = default)
+    public static async Task RunFolderAsync(Options opt, CancellationToken cancellationToken = default,
+        IProgress<string>? progress = null)
     {
         if (string.IsNullOrEmpty(opt.InputFolder) || !Directory.Exists(opt.InputFolder))
             throw new DirectoryNotFoundException(opt.InputFolder);
@@ -26,7 +32,128 @@ public static class RembgRunner
 
         Directory.CreateDirectory(opt.OutputFolder);
 
-        var (fileName, arguments) = ResolveCommand(opt);
+        var allFiles = EnumerateImageFiles(opt.InputFolder).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+        if (allFiles.Count == 0)
+            return;
+
+        var jobs = Math.Clamp(opt.ParallelJobs, 1, 8);
+        if (jobs == 1 || allFiles.Count == 1)
+        {
+            progress?.Report("正在抠图（单进程）…");
+            await RunSingleFolderAsync(opt, opt.InputFolder, opt.OutputFolder, ompThreads: null, cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        jobs = Math.Min(jobs, allFiles.Count);
+        var tempRoot = Path.Combine(Path.GetTempPath(), "Mp4ToFrame-rembg-" + Guid.NewGuid().ToString("N"));
+        var perProcessThreads = Math.Max(1, Environment.ProcessorCount / jobs);
+
+        try
+        {
+            var batches = SplitIntoBatches(allFiles, jobs);
+            var tasks = new List<Task>();
+
+            for (var i = 0; i < batches.Count; i++)
+            {
+                var batch = batches[i];
+                var inDir = Path.Combine(tempRoot, "in", i.ToString(CultureInfo.InvariantCulture));
+                var outDir = Path.Combine(tempRoot, "out", i.ToString(CultureInfo.InvariantCulture));
+                Directory.CreateDirectory(inDir);
+                Directory.CreateDirectory(outDir);
+
+                foreach (var src in batch)
+                {
+                    var name = Path.GetFileName(src);
+                    var dst = Path.Combine(inDir, name);
+                    LinkOrCopyFile(src, dst);
+                }
+
+                var idx = i;
+                tasks.Add(Task.Run(async () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    progress?.Report($"正在抠图（并行 {idx + 1}/{batches.Count}）…");
+                    await RunSingleFolderAsync(opt, inDir, outDir, perProcessThreads, cancellationToken)
+                        .ConfigureAwait(false);
+                }, cancellationToken));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            foreach (var batchDir in Directory.GetDirectories(Path.Combine(tempRoot, "out")))
+            {
+                foreach (var png in Directory.GetFiles(batchDir, "*.png", SearchOption.TopDirectoryOnly))
+                {
+                    var dest = Path.Combine(opt.OutputFolder, Path.GetFileName(png));
+                    File.Copy(png, dest, overwrite: true);
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot))
+                    Directory.Delete(tempRoot, true);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    static IEnumerable<string> EnumerateImageFiles(string folder)
+    {
+        foreach (var ext in ImageExtensions)
+        {
+            foreach (var f in Directory.EnumerateFiles(folder, "*" + ext, SearchOption.AllDirectories))
+                yield return f;
+        }
+    }
+
+    static List<List<string>> SplitIntoBatches(List<string> files, int batchCount)
+    {
+        var batches = new List<List<string>>();
+        for (var i = 0; i < batchCount; i++)
+            batches.Add(new List<string>());
+
+        for (var i = 0; i < files.Count; i++)
+            batches[i % batchCount].Add(files[i]);
+
+        return batches.Where(b => b.Count > 0).ToList();
+    }
+
+    static void LinkOrCopyFile(string sourcePath, string destPath)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
+            string.Equals(Path.GetPathRoot(Path.GetFullPath(sourcePath)),
+                Path.GetPathRoot(Path.GetFullPath(destPath)), StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (File.Exists(destPath))
+                    File.Delete(destPath);
+                if (CreateHardLinkWin(destPath, sourcePath, IntPtr.Zero))
+                    return;
+            }
+            catch
+            {
+                // fall through
+            }
+        }
+
+        File.Copy(sourcePath, destPath, overwrite: true);
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateHardLinkW")]
+    static extern bool CreateHardLinkWin(string newFileName, string existingFileName, IntPtr securityAttributes);
+
+    static async Task RunSingleFolderAsync(Options template, string inputFolder, string outputFolder,
+        int? ompThreads, CancellationToken cancellationToken)
+    {
+        var (fileName, arguments) = ResolveCommand(template, inputFolder, outputFolder);
 
         using var proc = new Process
         {
@@ -42,12 +169,20 @@ public static class RembgRunner
             }
         };
 
+        if (ompThreads is int t)
+        {
+            proc.StartInfo.Environment["OMP_NUM_THREADS"] = t.ToString(CultureInfo.InvariantCulture);
+            proc.StartInfo.Environment["MKL_NUM_THREADS"] = t.ToString(CultureInfo.InvariantCulture);
+            proc.StartInfo.Environment["OPENBLAS_NUM_THREADS"] = t.ToString(CultureInfo.InvariantCulture);
+        }
+
         proc.Start();
         var errTask = proc.StandardError.ReadToEndAsync(cancellationToken);
         var outTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
-        await proc.WaitForExitAsync(cancellationToken);
-        var err = await errTask;
-        var std = await outTask;
+
+        await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        var err = await errTask.ConfigureAwait(false);
+        var std = await outTask.ConfigureAwait(false);
 
         if (proc.ExitCode != 0)
             throw new InvalidOperationException(
@@ -55,13 +190,13 @@ public static class RembgRunner
                 "或在界面填写 rembg.exe / python.exe 完整路径。");
     }
 
-    public static string BuildRembgCliArguments(Options opt)
+    public static string BuildRembgCliArguments(Options opt, string inputFolder, string outputFolder)
     {
         var sb = new StringBuilder();
         sb.Append("p \"");
-        sb.Append(EscapeForProcessArgument(opt.InputFolder));
+        sb.Append(EscapeForProcessArgument(inputFolder));
         sb.Append("\" \"");
-        sb.Append(EscapeForProcessArgument(opt.OutputFolder));
+        sb.Append(EscapeForProcessArgument(outputFolder));
         sb.Append('"');
         if (!string.IsNullOrWhiteSpace(opt.Model))
         {
@@ -81,9 +216,9 @@ public static class RembgRunner
         return sb.ToString();
     }
 
-    static (string fileName, string arguments) ResolveCommand(Options opt)
+    static (string fileName, string arguments) ResolveCommand(Options opt, string inputFolder, string outputFolder)
     {
-        var argBody = BuildRembgCliArguments(opt);
+        var argBody = BuildRembgCliArguments(opt, inputFolder, outputFolder);
 
         if (!string.IsNullOrWhiteSpace(opt.RembgExecutable))
         {

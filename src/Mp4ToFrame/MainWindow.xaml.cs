@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -32,6 +33,10 @@ public partial class MainWindow : Window
         ChkAlphaMatting.Checked += (_, _) => UpdateErodePanel();
         ChkAlphaMatting.Unchecked += (_, _) => UpdateErodePanel();
 
+        for (var p = 1; p <= 8; p++)
+            ComboRembgParallel.Items.Add(p);
+        ComboRembgParallel.SelectedIndex = 0;
+
         _videoListDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         _videoListDebounce.Tick += (_, _) =>
         {
@@ -49,8 +54,16 @@ public partial class MainWindow : Window
         TxtWorkspace.Text = _settings.WorkspaceRoot;
         TxtWidth.Text = _settings.Width.ToString();
         TxtHeight.Text = _settings.Height.ToString();
-        TxtFps.Text = _settings.TargetFps.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        TxtFps.Text = _settings.TargetFps.ToString(CultureInfo.InvariantCulture);
         ChkMirror.IsChecked = _settings.MirrorHorizontally;
+        var inv = CultureInfo.InvariantCulture;
+        TxtBorderL.Text = _settings.BorderLeft.ToString(inv);
+        TxtBorderR.Text = _settings.BorderRight.ToString(inv);
+        TxtBorderT.Text = _settings.BorderTop.ToString(inv);
+        TxtBorderB.Text = _settings.BorderBottom.ToString(inv);
+        TxtBorderFillArgb.Text = _settings.BorderFillArgb == 0
+            ? "00000000"
+            : _settings.BorderFillArgb.ToString("X8", inv);
         TxtRembg.Text = _settings.RembgPath ?? "";
         if (!string.IsNullOrWhiteSpace(_settings.FfmpegPath))
             TxtFfmpeg.Text = _settings.FfmpegPath!;
@@ -66,7 +79,18 @@ public partial class MainWindow : Window
         ChkAlphaMatting.IsChecked = _settings.RembgAlphaMatting;
         SliderErode.Value = _settings.RembgAlphaErode;
         ChkPostProcess.IsChecked = _settings.RembgPostProcessMask;
+        ComboRembgParallel.SelectedIndex = Math.Clamp(_settings.RembgParallelJobs - 1, 0, 7);
         TxtErodeValue.Text = ((int)SliderErode.Value).ToString();
+        TxtFinalWidth.Text = _settings.FinalExportWidth.ToString(inv);
+        TxtFinalHeight.Text = _settings.FinalExportHeight.ToString(inv);
+        TxtFinalOutputFolder.Text = _settings.FinalExportOutputFolder ?? "";
+        TxtFinalBorderL.Text = _settings.FinalBorderLeft.ToString(inv);
+        TxtFinalBorderR.Text = _settings.FinalBorderRight.ToString(inv);
+        TxtFinalBorderT.Text = _settings.FinalBorderTop.ToString(inv);
+        TxtFinalBorderB.Text = _settings.FinalBorderBottom.ToString(inv);
+        TxtFinalBorderFillArgb.Text = _settings.FinalBorderFillArgb == 0
+            ? "00000000"
+            : _settings.FinalBorderFillArgb.ToString("X8", inv);
         UpdateCustomModelPanel();
         UpdateErodePanel();
 
@@ -100,6 +124,11 @@ public partial class MainWindow : Window
                 System.Globalization.CultureInfo.InvariantCulture, out var fps))
             _settings.TargetFps = fps;
         _settings.MirrorHorizontally = ChkMirror.IsChecked == true;
+        if (TryParseBorderInt(TxtBorderL.Text, out var bl)) _settings.BorderLeft = bl;
+        if (TryParseBorderInt(TxtBorderR.Text, out var br)) _settings.BorderRight = br;
+        if (TryParseBorderInt(TxtBorderT.Text, out var bt)) _settings.BorderTop = bt;
+        if (TryParseBorderInt(TxtBorderB.Text, out var bb)) _settings.BorderBottom = bb;
+        if (TryParseArgbHex(TxtBorderFillArgb.Text, out var argb)) _settings.BorderFillArgb = argb;
         _settings.RembgPath = string.IsNullOrWhiteSpace(TxtRembg.Text) ? null : TxtRembg.Text.Trim();
         _settings.FfmpegPath = string.IsNullOrWhiteSpace(TxtFfmpeg.Text) ? null : TxtFfmpeg.Text.Trim();
         _settings.RembgModelIndex = ComboModel.SelectedIndex >= 0 ? ComboModel.SelectedIndex : 0;
@@ -107,6 +136,17 @@ public partial class MainWindow : Window
         _settings.RembgAlphaMatting = ChkAlphaMatting.IsChecked == true;
         _settings.RembgAlphaErode = (int)SliderErode.Value;
         _settings.RembgPostProcessMask = ChkPostProcess.IsChecked == true;
+        _settings.RembgParallelJobs = ComboRembgParallel.SelectedIndex >= 0 ? ComboRembgParallel.SelectedIndex + 1 : 1;
+        if (int.TryParse(TxtFinalWidth.Text, out var fw)) _settings.FinalExportWidth = fw;
+        if (int.TryParse(TxtFinalHeight.Text, out var fh)) _settings.FinalExportHeight = fh;
+        _settings.FinalExportOutputFolder = string.IsNullOrWhiteSpace(TxtFinalOutputFolder.Text)
+            ? ""
+            : TxtFinalOutputFolder.Text.Trim();
+        if (TryParseBorderInt(TxtFinalBorderL.Text, out var fbl)) _settings.FinalBorderLeft = fbl;
+        if (TryParseBorderInt(TxtFinalBorderR.Text, out var fbr)) _settings.FinalBorderRight = fbr;
+        if (TryParseBorderInt(TxtFinalBorderT.Text, out var fbt)) _settings.FinalBorderTop = fbt;
+        if (TryParseBorderInt(TxtFinalBorderB.Text, out var fbb)) _settings.FinalBorderBottom = fbb;
+        if (TryParseArgbHex(TxtFinalBorderFillArgb.Text, out var fbfill)) _settings.FinalBorderFillArgb = fbfill;
         if (ComboVideo.SelectedIndex >= 0)
             _settings.SelectedVideoIndex = ComboVideo.SelectedIndex;
     }
@@ -161,11 +201,13 @@ public partial class MainWindow : Window
             TxtPathVideo.Text = "";
             TxtPathFrame.Text = "";
             TxtPathMatted.Text = "";
+            TxtPathFinal.Text = "";
             ComboVideo.ItemsSource = null;
             TxtVideoHint.Text = "请先设置有效的工作路径。";
             BtnVideoToFrame.IsEnabled = false;
             BtnVideoToFrameMatted.IsEnabled = false;
             BtnFrameToMatted.IsEnabled = false;
+            BtnMattedToFinal.IsEnabled = false;
             return;
         }
 
@@ -173,6 +215,9 @@ public partial class MainWindow : Window
         TxtPathVideo.Text = $"{WorkspaceLayout.VideoFolderName}: {WorkspaceLayout.VideoDir(root)}";
         TxtPathFrame.Text = $"{WorkspaceLayout.FrameFolderName}: {WorkspaceLayout.FrameDir(root)}";
         TxtPathMatted.Text = $"{WorkspaceLayout.MattedFolderName}: {WorkspaceLayout.MattedDir(root)}";
+        var defaultFinal = WorkspaceLayout.FinalExportDir(root);
+        TxtPathFinal.Text =
+            $"{WorkspaceLayout.FinalExportFolderName}（默认输出）: {defaultFinal}";
 
         var paths = WorkspaceLayout.ListMp4InVideo(root);
         var items = new ObservableCollection<VideoItem>(
@@ -186,9 +231,11 @@ public partial class MainWindow : Window
 
         var hasVideo = items.Count > 0;
         var hasFrames = WorkspaceLayout.HasFrameImages(root);
+        var hasMatted = WorkspaceLayout.HasMattedImages(root);
         BtnVideoToFrame.IsEnabled = hasVideo;
         BtnVideoToFrameMatted.IsEnabled = hasVideo;
         BtnFrameToMatted.IsEnabled = hasFrames;
+        BtnMattedToFinal.IsEnabled = hasMatted;
 
         if (!hasVideo)
             TxtVideoHint.Text = "Video 中暂无 MP4。可将已有图片放入 Frame，使用「Frame → Matted」抠图。";
@@ -375,6 +422,7 @@ public partial class MainWindow : Window
 
     RembgRunner.Options BuildRembgOptions(string frameDir, string mattedDir)
     {
+        var jobs = ComboRembgParallel.SelectedIndex >= 0 ? ComboRembgParallel.SelectedIndex + 1 : 1;
         return new RembgRunner.Options
         {
             InputFolder = frameDir,
@@ -383,7 +431,8 @@ public partial class MainWindow : Window
             Model = RembgModelCatalog.ResolveModelId(ComboModel.SelectedIndex, TxtCustomModel.Text),
             AlphaMatting = ChkAlphaMatting.IsChecked == true,
             AlphaMattingErodeSize = (int)SliderErode.Value,
-            PostProcessMask = ChkPostProcess.IsChecked == true
+            PostProcessMask = ChkPostProcess.IsChecked == true,
+            ParallelJobs = jobs
         };
     }
 
@@ -400,6 +449,121 @@ public partial class MainWindow : Window
     async void BtnFrameToMatted_Click(object sender, RoutedEventArgs e)
     {
         await RunMatteOnlyAsync();
+    }
+
+    void BtnBrowseFinalOutput_Click(object sender, RoutedEventArgs e)
+    {
+        using var dlg = new System.Windows.Forms.FolderBrowserDialog();
+        dlg.SelectedPath = string.IsNullOrWhiteSpace(TxtFinalOutputFolder.Text)
+            ? (string.IsNullOrWhiteSpace(TxtWorkspace.Text)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+                : TxtWorkspace.Text.Trim())
+            : TxtFinalOutputFolder.Text.Trim();
+        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            TxtFinalOutputFolder.Text = dlg.SelectedPath;
+    }
+
+    async void BtnMattedToFinal_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMattedToFinalAsync();
+    }
+
+    string ResolveFinalOutputDirectory(string workspaceRoot)
+    {
+        var custom = TxtFinalOutputFolder.Text.Trim();
+        if (string.IsNullOrEmpty(custom))
+            return WorkspaceLayout.FinalExportDir(workspaceRoot);
+        return Path.GetFullPath(custom);
+    }
+
+    async Task RunMattedToFinalAsync()
+    {
+        PushSettingsFromUi();
+        var root = Path.GetFullPath(TxtWorkspace.Text.Trim());
+        if (!Directory.Exists(root))
+        {
+            System.Windows.MessageBox.Show("工作路径无效。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!int.TryParse(TxtFinalWidth.Text, out var fw) || !int.TryParse(TxtFinalHeight.Text, out var fh) ||
+            fw < 16 || fh < 16)
+        {
+            System.Windows.MessageBox.Show("最终导出宽高须为不小于 16 的整数。", "提示", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var ffmpeg = ResolveFfmpegPath();
+        if (ffmpeg == null)
+        {
+            System.Windows.MessageBox.Show("未找到 ffmpeg.exe。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        WorkspaceLayout.FixLegacyNamesAndEnsureFolders(root);
+        var mattedDir = WorkspaceLayout.MattedDir(root);
+        var finalDir = ResolveFinalOutputDirectory(root);
+
+        if (string.Equals(Path.GetFullPath(mattedDir), Path.GetFullPath(finalDir), StringComparison.OrdinalIgnoreCase))
+        {
+            System.Windows.MessageBox.Show("输出文件夹不能与 Matted 相同，请指定其他目录或留空使用 Final。", "提示",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!WorkspaceLayout.HasMattedImages(root))
+        {
+            System.Windows.MessageBox.Show("Matted 中没有 png/jpg。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!TryParseBorderInt(TxtFinalBorderL.Text, out var fbL) || !TryParseBorderInt(TxtFinalBorderR.Text, out var fbR) ||
+            !TryParseBorderInt(TxtFinalBorderT.Text, out var fbT) || !TryParseBorderInt(TxtFinalBorderB.Text, out var fbB))
+        {
+            System.Windows.MessageBox.Show("最终导出 Border L/R/T/B 须为整数（可为负）。", "提示", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!TryParseArgbHex(TxtFinalBorderFillArgb.Text, out var fbFillArgb))
+        {
+            System.Windows.MessageBox.Show("最终导出外扩填充须为 6 或 8 位十六进制（AARRGGBB 或 RRGGBB），可带 #。", "提示",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            FfmpegFrameExtractor.ValidateBorder(fw, fh, fbL, fbR, fbT, fbB);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        SetBusy(true);
+        try
+        {
+            var progress = new Progress<string>(s =>
+                Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
+            var n = await MattedFinalExporter.ExportFolderAsync(ffmpeg, mattedDir, finalDir, fw, fh,
+                    fbL, fbR, fbT, fbB, fbFillArgb, progress)
+                .ConfigureAwait(true);
+            System.Windows.MessageBox.Show($"已将 {n} 张图导出到：\n{finalDir}", "完成", MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+            TxtStatus.Text = "";
+            RefreshWorkspaceUi(ComboVideo.SelectedIndex >= 0 ? ComboVideo.SelectedIndex : null);
+        }
     }
 
     async Task RunExportAsync(bool matteAfter)
@@ -426,10 +590,34 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!double.TryParse(TxtFps.Text, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var fps) || fps <= 0)
+        if (!double.TryParse(TxtFps.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var fps) || fps <= 0)
         {
             System.Windows.MessageBox.Show("帧率必须大于 0。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!TryParseBorderInt(TxtBorderL.Text, out var bL) || !TryParseBorderInt(TxtBorderR.Text, out var bR) ||
+            !TryParseBorderInt(TxtBorderT.Text, out var bT) || !TryParseBorderInt(TxtBorderB.Text, out var bB))
+        {
+            System.Windows.MessageBox.Show("Border L/R/T/B 须为整数（可为负）。", "提示", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!TryParseArgbHex(TxtBorderFillArgb.Text, out var fillArgb))
+        {
+            System.Windows.MessageBox.Show("外扩填充须为 6 或 8 位十六进制（AARRGGBB 或 RRGGBB），可带 #。", "提示",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            FfmpegFrameExtractor.ValidateBorder(w, h, bL, bR, bT, bB);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -452,12 +640,16 @@ public partial class MainWindow : Window
             var progress = new Progress<string>(s =>
                 Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
             var count = await FfmpegFrameExtractor.ExtractAsync(
-                ffmpeg, vi.Path, frameDir, w, h, fps, ChkMirror.IsChecked == true, progress);
+                ffmpeg, vi.Path, frameDir, w, h, fps, ChkMirror.IsChecked == true,
+                bL, bR, bT, bB, fillArgb, progress);
 
             if (matteAfter)
             {
                 TxtStatus.Text = "正在抠图…";
-                await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir));
+                var rembgProgress = new Progress<string>(s =>
+                    Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
+                await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir),
+                    cancellationToken: default, rembgProgress);
                 System.Windows.MessageBox.Show($"已导出 {count} 张到 Frame，并完成抠图到 Matted。", "完成",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -505,7 +697,10 @@ public partial class MainWindow : Window
         try
         {
             TxtStatus.Text = "正在抠图…";
-            await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir));
+            var rembgProgress = new Progress<string>(s =>
+                Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
+            await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir),
+                cancellationToken: default, rembgProgress);
             System.Windows.MessageBox.Show("已从 Frame 抠图并写入 Matted。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -528,9 +723,11 @@ public partial class MainWindow : Window
         var rootOk = !string.IsNullOrEmpty(root) && Directory.Exists(root);
         var nVideo = ComboVideo.Items.Count;
         var hasFrames = rootOk && WorkspaceLayout.HasFrameImages(root);
+        var hasMatted = rootOk && WorkspaceLayout.HasMattedImages(root);
         BtnVideoToFrame.IsEnabled = !busy && nVideo > 0;
         BtnVideoToFrameMatted.IsEnabled = !busy && nVideo > 0;
         BtnFrameToMatted.IsEnabled = !busy && hasFrames;
+        BtnMattedToFinal.IsEnabled = !busy && hasMatted;
         TxtWorkspace.IsEnabled = !busy;
         BtnBrowseWorkspace.IsEnabled = !busy;
         ComboVideo.IsEnabled = !busy;
@@ -539,13 +736,55 @@ public partial class MainWindow : Window
         TxtHeight.IsEnabled = !busy;
         TxtFps.IsEnabled = !busy;
         ChkMirror.IsEnabled = !busy;
+        TxtBorderL.IsEnabled = !busy;
+        TxtBorderR.IsEnabled = !busy;
+        TxtBorderT.IsEnabled = !busy;
+        TxtBorderB.IsEnabled = !busy;
+        TxtBorderFillArgb.IsEnabled = !busy;
         TxtRembg.IsEnabled = !busy;
         ComboModel.IsEnabled = !busy;
         TxtCustomModel.IsEnabled = !busy;
         ChkAlphaMatting.IsEnabled = !busy;
         SliderErode.IsEnabled = !busy && ChkAlphaMatting.IsChecked == true;
         ChkPostProcess.IsEnabled = !busy;
+        ComboRembgParallel.IsEnabled = !busy;
+        TxtFinalWidth.IsEnabled = !busy;
+        TxtFinalHeight.IsEnabled = !busy;
+        TxtFinalOutputFolder.IsEnabled = !busy;
+        BtnBrowseFinalOutput.IsEnabled = !busy;
+        TxtFinalBorderL.IsEnabled = !busy;
+        TxtFinalBorderR.IsEnabled = !busy;
+        TxtFinalBorderT.IsEnabled = !busy;
+        TxtFinalBorderB.IsEnabled = !busy;
+        TxtFinalBorderFillArgb.IsEnabled = !busy;
         BtnDownloadFfmpeg.IsEnabled = !busy && ResolveFfmpegPath() == null;
         BtnWingetFfmpeg.IsEnabled = !busy && FfmpegInstaller.FindWingetPath() != null;
+    }
+
+    static bool TryParseBorderInt(string? s, out int v)
+    {
+        v = 0;
+        if (string.IsNullOrWhiteSpace(s)) return true;
+        return int.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v);
+    }
+
+    /// <summary>空=全透明；6 位 RRGGBB 按不透明；8 位 AARRGGBB。</summary>
+    static bool TryParseArgbHex(string? s, out uint argb)
+    {
+        argb = 0;
+        if (string.IsNullOrWhiteSpace(s)) return true;
+        var t = s.Trim();
+        if (t.StartsWith('#')) t = t[1..];
+        if (t.Length == 6)
+        {
+            if (!uint.TryParse(t, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
+                return false;
+            argb = 0xFF000000u | (rgb & 0xFFFFFFu);
+            return true;
+        }
+
+        if (t.Length == 8)
+            return uint.TryParse(t, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out argb);
+        return false;
     }
 }

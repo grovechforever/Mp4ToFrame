@@ -1,8 +1,8 @@
 ﻿<Window x:Class="Mp4ToFrame.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="MP4 → 序列帧 / 抠图" Height="720" Width="560"
-        MinHeight="600" MinWidth="480"
+        Title="MP4 → 序列帧 / 抠图" Height="860" Width="560"
+        MinHeight="680" MinWidth="480"
         Loaded="Window_Loaded"
         Activated="Window_Activated"
         Closing="Window_Closing">
@@ -12,7 +12,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="12">
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Visible" Padding="12">
             <StackPanel>
                 <GroupBox Header="工作区" Margin="0,0,0,8">
                     <StackPanel Margin="8">
@@ -28,8 +28,10 @@
                                    FontSize="11"/>
                         <TextBlock x:Name="TxtPathMatted" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="Gray"
                                    FontSize="11"/>
+                        <TextBlock x:Name="TxtPathFinal" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="Gray"
+                                   FontSize="11"/>
                         <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11" Foreground="DarkSlateGray">
-                            将 MP4 放入 Video；序列帧输出到 Frame；抠图输出到 Matted。若存在误拼文件夹 Vedio，会自动改名为 Video。
+                            将 MP4 放入 Video；序列帧输出到 Frame；抠图输出到 Matted；可将 Matted 按目标尺寸导出到 Final（或自定义文件夹）。
                         </TextBlock>
                     </StackPanel>
                 </GroupBox>
@@ -66,7 +68,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Header="导出参数" Margin="0,0,0,8">
+                <GroupBox Header="导出：分辨率与帧率" Margin="0,0,0,8">
                     <Grid Margin="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -89,6 +91,36 @@
                     </Grid>
                 </GroupBox>
 
+                <GroupBox Header="Border（L / R / T / B）裁切与外扩" Margin="0,0,0,8">
+                    <StackPanel Margin="8">
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="DarkSlateGray" Margin="0,0,0,8"
+                                   Text="正数：从该边向内裁切（像素）。负数：向该边外扩 |值| 像素，扩展区用下方「外扩填充」着色（默认透明）。"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6">L（左）</TextBlock>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="TxtBorderL" Margin="0,0,12,6"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,6">R（右）</TextBlock>
+                            <TextBox Grid.Row="0" Grid.Column="3" x:Name="TxtBorderR" Margin="0,0,0,6"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0">T（上）</TextBlock>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="TxtBorderT" Margin="0,0,12,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,0">B（下）</TextBlock>
+                            <TextBox Grid.Row="1" Grid.Column="3" x:Name="TxtBorderB" Margin="0,0,0,0"/>
+                        </Grid>
+                        <TextBlock Margin="0,0,0,4">外扩填充 ARGB</TextBlock>
+                        <TextBox x:Name="TxtBorderFillArgb"
+                                 ToolTip="8 位十六进制 AARRGGBB，默认 00000000=全透明；可带 #。6 位 RRGGBB 视为不透明。"/>
+                    </StackPanel>
+                </GroupBox>
+
                 <GroupBox Header="抠图 (rembg)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Margin="0,0,0,4">rembg / python 路径（可选）</TextBlock>
@@ -107,11 +139,69 @@
                             <TextBlock x:Name="TxtErodeValue" HorizontalAlignment="Right" FontSize="11"/>
                         </StackPanel>
                         <CheckBox x:Name="ChkPostProcess" Content="蒙版后处理 (-ppm)" Margin="0,8,0,0"/>
+                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="并行进程数"/>
+                            <ComboBox x:Name="ComboRembgParallel" Width="72" VerticalAlignment="Center"
+                                      ToolTip="1=与官方 rembg 相同（单进程顺序）。2–8=多进程分批并行，可缩短总耗时；每进程会加载一份模型，内存占用约按进程数倍增。多进程时会限制每进程 OMP 线程数以减少争抢。"/>
+                        </StackPanel>
                         <Expander Header="说明" Margin="0,8,0,0">
                             <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,4,0,0">
-                                pip install "rembg[cli,cpu]"。首次抠图会下载模型。列表与 rembg p --help 中 -m 选项一致。
+                                pip install "rembg[cli,cpu]" 或带 NVIDIA 时试 "rembg[gpu,cli]"。首次抠图会下载模型。列表与 rembg p --help 中 -m 一致。想更快还可换轻量模型（如 u2netp）、关掉 Alpha matting、或提高「并行进程数」。
                             </TextBlock>
                         </Expander>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="最终导出（Matted → 目标分辨率）" Margin="0,0,0,8">
+                    <StackPanel Margin="8">
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="DarkSlateGray" Margin="0,0,0,8"
+                                   Text="在「全分辨率」下抠图后，将 Matted 内图片等比缩放到下方目标宽高（不足处透明边），再应用下方 Border（与「视频抽帧」处 Border 规则相同），写入输出文件夹。"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,6">目标宽度</TextBlock>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="TxtFinalWidth" Margin="0,0,0,6"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0">目标高度</TextBlock>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="TxtFinalHeight" Margin="0,0,0,0"/>
+                        </Grid>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="DarkSlateGray" Margin="0,0,0,6"
+                                   Text="Border（最终导出）：正=内切，负=外扩；填充色仅作用于外扩区域。"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6">L</TextBlock>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="TxtFinalBorderL" Margin="0,0,12,6"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,6">R</TextBlock>
+                            <TextBox Grid.Row="0" Grid.Column="3" x:Name="TxtFinalBorderR" Margin="0,0,0,6"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0">T</TextBlock>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="TxtFinalBorderT" Margin="0,0,12,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,0">B</TextBlock>
+                            <TextBox Grid.Row="1" Grid.Column="3" x:Name="TxtFinalBorderB" Margin="0,0,0,0"/>
+                        </Grid>
+                        <TextBlock Margin="0,0,0,4">外扩填充 ARGB（最终 Border）</TextBlock>
+                        <TextBox x:Name="TxtFinalBorderFillArgb" Margin="0,0,0,8"
+                                 ToolTip="与视频抽帧 Border 相同：8 位 AARRGGBB，默认 00000000=全透明。"/>
+                        <TextBlock Margin="0,0,0,4">输出文件夹（可选）</TextBlock>
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="BtnBrowseFinalOutput" Content="浏览…" Width="72" DockPanel.Dock="Right"
+                                    Margin="8,0,0,0" Click="BtnBrowseFinalOutput_Click"/>
+                            <TextBox x:Name="TxtFinalOutputFolder" VerticalContentAlignment="Center"
+                                     ToolTip="留空则使用工作路径下的 Final 文件夹"/>
+                        </DockPanel>
                     </StackPanel>
                 </GroupBox>
             </StackPanel>
@@ -130,6 +220,8 @@
                     Click="BtnVideoToFrameMatted_Click"/>
             <Button x:Name="BtnFrameToMatted" Content="Frame → Matted（仅抠图，无需视频）" Height="28"
                     Click="BtnFrameToMatted_Click"/>
+            <Button x:Name="BtnMattedToFinal" Content="Matted → 最终导出（按目标分辨率）" Height="28" Margin="0,6,0,0"
+                    Click="BtnMattedToFinal_Click"/>
         </StackPanel>
     </Grid>
 </Window>
