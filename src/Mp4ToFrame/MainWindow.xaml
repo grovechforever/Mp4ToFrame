@@ -121,32 +121,70 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Header="抠图 (rembg)" Margin="0,0,0,8">
+                <GroupBox Header="抠图 (Frame → Matted)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Margin="0,0,0,4">rembg / python 路径（可选）</TextBlock>
-                        <TextBox x:Name="TxtRembg"/>
-                        <TextBlock Margin="0,8,0,4">抠图模型</TextBlock>
-                        <ComboBox x:Name="ComboModel" SelectionChanged="ComboModel_SelectionChanged"/>
-                        <StackPanel x:Name="PanelCustomModel" Visibility="Collapsed" Margin="0,8,0,0">
-                            <TextBlock>自定义模型 ID</TextBlock>
-                            <TextBox x:Name="TxtCustomModel" Margin="0,4,0,0"/>
+                        <TextBlock Margin="0,0,0,4">抠图方式</TextBlock>
+                        <ComboBox x:Name="ComboMatteMode" Margin="0,0,0,8" SelectionChanged="ComboMatteMode_SelectionChanged"/>
+                        <StackPanel x:Name="PanelRembgDetails">
+                            <TextBlock Margin="0,0,0,4">rembg / python 路径（可选）</TextBlock>
+                            <TextBox x:Name="TxtRembg"/>
+                            <TextBlock Margin="0,8,0,4">抠图模型</TextBlock>
+                            <ComboBox x:Name="ComboModel" SelectionChanged="ComboModel_SelectionChanged"/>
+                            <StackPanel x:Name="PanelCustomModel" Visibility="Collapsed" Margin="0,8,0,0">
+                                <TextBlock>自定义模型 ID</TextBlock>
+                                <TextBox x:Name="TxtCustomModel" Margin="0,4,0,0"/>
+                            </StackPanel>
+                            <CheckBox x:Name="ChkAlphaMatting" Content="Alpha matting (-a)" Margin="0,12,0,0"/>
+                            <StackPanel x:Name="PanelErode" Margin="16,4,0,0">
+                                <TextBlock Text="腐蚀 -ae（越小越保细节）"/>
+                                <Slider x:Name="SliderErode" Minimum="0" Maximum="15" TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Value="4"/>
+                                <TextBlock x:Name="TxtErodeValue" HorizontalAlignment="Right" FontSize="11"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <TextBlock VerticalAlignment="Center" Text="前景 -af" Margin="0,0,6,0"/>
+                                    <TextBox x:Name="TxtRembgAf" Width="48" VerticalAlignment="Center"
+                                             ToolTip="trimap 前景阈值，默认 240（与 rembg 一致）。蒙版略软时过高会把身体判成“未知区”而被 matting 抠淡；可试 200–220。"/>
+                                    <TextBlock VerticalAlignment="Center" Text="背景 -ab" Margin="16,0,6,0"/>
+                                    <TextBox x:Name="TxtRembgAb" Width="48" VerticalAlignment="Center"
+                                             ToolTip="trimap 背景阈值，默认 10（与 rembg 一致）。范围 0–255。"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <CheckBox x:Name="ChkPostProcess" Content="蒙版后处理 (-ppm)" Margin="0,8,0,0"/>
+                            <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                                <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="并行进程数"/>
+                                <ComboBox x:Name="ComboRembgParallel" Width="72" VerticalAlignment="Center"
+                                          ToolTip="1=与官方 rembg 相同（单进程顺序）。2–8=多进程分批并行，可缩短总耗时；每进程会加载一份模型，内存占用约按进程数倍增。多进程时会限制每进程 OMP 线程数以减少争抢。"/>
+                            </StackPanel>
                         </StackPanel>
-                        <CheckBox x:Name="ChkAlphaMatting" Content="Alpha matting (-a)" Margin="0,12,0,0"/>
-                        <StackPanel x:Name="PanelErode" Margin="16,4,0,0">
-                            <TextBlock Text="腐蚀 -ae（越小越保细节）"/>
-                            <Slider x:Name="SliderErode" Minimum="0" Maximum="15" TickFrequency="1" IsSnapToTickEnabled="True"
-                                    Value="4"/>
-                            <TextBlock x:Name="TxtErodeValue" HorizontalAlignment="Right" FontSize="11"/>
+                        <StackPanel x:Name="PanelWhiteKeyParams" Margin="0,4,0,0" Visibility="Collapsed">
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="DarkSlateGray" Margin="0,0,0,8"
+                                       Text="适用于背景为单一纯色。键控颜色填与背景一致的 RRGGBB（白底 FFFFFF、绿幕常用 00FF00 或 00B140、蓝幕常用 0047BB）。需 ffmpeg.exe；主体上勿出现与背景同色块。"/>
+                            <TextBlock Margin="0,0,0,4">键控颜色 RRGGBB</TextBlock>
+                            <TextBox x:Name="TxtWhiteKeyRgb" ToolTip="6 位十六进制，与导出序列帧背景色一致；可带 #。绿底示例：00FF00 或 00B140；蓝底示例：0047BB。"/>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0" Text="similarity"/>
+                                <TextBox Grid.Column="1" x:Name="TxtWhiteKeySimilarity" Margin="0,0,16,0"
+                                         ToolTip="与 FFmpeg colorkey 的 similarity，(0,1]，越大越多吃近背景色；默认 0.08。"/>
+                                <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="0,0,8,0" Text="blend"/>
+                                <TextBox Grid.Column="3" x:Name="TxtWhiteKeyBlend"
+                                         ToolTip="边缘混合，[0,1]；默认 0.04。过大会糊边。"/>
+                            </Grid>
+                            <TextBlock Margin="0,10,0,4" Text="去溢色（减轻绿边/蓝边）"/>
+                            <ComboBox x:Name="ComboWhiteKeyDespill"
+                                      ToolTip="绿幕常见边缘发绿：选「自动」或「绿幕去边」在 colorkey 后接 FFmpeg despill。白底一般选「关闭」。FFmpeg 需支持 despill（较新版本）。"/>
                         </StackPanel>
-                        <CheckBox x:Name="ChkPostProcess" Content="蒙版后处理 (-ppm)" Margin="0,8,0,0"/>
-                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
-                            <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="并行进程数"/>
-                            <ComboBox x:Name="ComboRembgParallel" Width="72" VerticalAlignment="Center"
-                                      ToolTip="1=与官方 rembg 相同（单进程顺序）。2–8=多进程分批并行，可缩短总耗时；每进程会加载一份模型，内存占用约按进程数倍增。多进程时会限制每进程 OMP 线程数以减少争抢。"/>
-                        </StackPanel>
+                        <TextBlock Margin="0,10,0,4" Text="Matted 输出文件名后缀（可选）"/>
+                        <TextBox x:Name="TxtMattedStemSuffix"
+                                 ToolTip="接在文件名 stem 末尾、扩展名 .png 之前，如 _matt → frame_0001_matt.png；留空则与 stem 同名。勿含路径非法字符。"/>
                         <Expander Header="说明" Margin="0,8,0,0">
                             <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,4,0,0">
-                                pip install "rembg[cli,cpu]" 或带 NVIDIA 时试 "rembg[gpu,cli]"。首次抠图会下载模型。列表与 rembg p --help 中 -m 一致。想更快还可换轻量模型（如 u2netp）、关掉 Alpha matting、或提高「并行进程数」。
+                                rembg：pip install &quot;rembg[cli,cpu]&quot; 等；若输出张数少于输入会报错。纯色底色键：不依赖 rembg，按键控色与 similarity 去底（白/绿/蓝等均可）。两种方式均可设「Matted 文件名后缀」。
                             </TextBlock>
                         </Expander>
                     </StackPanel>
@@ -195,6 +233,9 @@
                         <TextBlock Margin="0,0,0,4">外扩填充 ARGB（最终 Border）</TextBlock>
                         <TextBox x:Name="TxtFinalBorderFillArgb" Margin="0,0,0,8"
                                  ToolTip="与视频抽帧 Border 相同：8 位 AARRGGBB，默认 00000000=全透明。"/>
+                        <TextBlock Margin="0,0,0,4" Text="最终导出文件名后缀（可选）"/>
+                        <TextBox x:Name="TxtFinalStemSuffix" Margin="0,0,0,8"
+                                 ToolTip="拼在输出 .png 之前（接在 Matted 源 stem 末尾），例如 _1080p；留空则输出 stem 与 Matted 源一致。"/>
                         <TextBlock Margin="0,0,0,4">输出文件夹（可选）</TextBlock>
                         <DockPanel LastChildFill="True">
                             <Button x:Name="BtnBrowseFinalOutput" Content="浏览…" Width="72" DockPanel.Dock="Right"

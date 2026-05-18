@@ -44,6 +44,7 @@ public static class MattedFinalExporter
         int borderT,
         int borderB,
         uint borderFillArgb,
+        string? outputStemSuffix,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -67,7 +68,10 @@ public static class MattedFinalExporter
             progress?.Report(string.Format(inv, "最终导出 {0}/{1}…", i + 1, files.Count));
 
             var baseName = Path.GetFileNameWithoutExtension(src);
-            var dest = Path.Combine(outputDir, baseName + ".png");
+            var destName = string.IsNullOrEmpty(outputStemSuffix)
+                ? baseName + ".png"
+                : baseName + outputStemSuffix + ".png";
+            var dest = Path.Combine(outputDir, destName);
 
             var args = $"-hide_banner -loglevel error -y -i \"{EscapePath(src)}\" -vf \"{vf}\" \"{EscapePath(dest)}\"";
 

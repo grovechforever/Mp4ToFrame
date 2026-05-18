@@ -38,6 +38,16 @@ public partial class MainWindow : Window
             ComboRembgParallel.Items.Add(p);
         ComboRembgParallel.SelectedIndex = 0;
 
+        ComboMatteMode.Items.Add("rembg（神经网络）");
+        ComboMatteMode.Items.Add("纯色底色键（FFmpeg colorkey）");
+        ComboMatteMode.SelectedIndex = 0;
+
+        ComboWhiteKeyDespill.Items.Add("自动（绿/蓝幕去边）");
+        ComboWhiteKeyDespill.Items.Add("绿幕去边 (despill green=-1)");
+        ComboWhiteKeyDespill.Items.Add("蓝幕去边 (despill blue=-1)");
+        ComboWhiteKeyDespill.Items.Add("关闭");
+        ComboWhiteKeyDespill.SelectedIndex = 0;
+
         _videoListDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         _videoListDebounce.Tick += (_, _) =>
         {
@@ -79,8 +89,17 @@ public partial class MainWindow : Window
         TxtCustomModel.Text = _settings.RembgCustomModelId;
         ChkAlphaMatting.IsChecked = _settings.RembgAlphaMatting;
         SliderErode.Value = _settings.RembgAlphaErode;
+        TxtRembgAf.Text = _settings.RembgAlphaFg.ToString(inv);
+        TxtRembgAb.Text = _settings.RembgAlphaBg.ToString(inv);
         ChkPostProcess.IsChecked = _settings.RembgPostProcessMask;
         ComboRembgParallel.SelectedIndex = Math.Clamp(_settings.RembgParallelJobs - 1, 0, 7);
+        ComboMatteMode.SelectedIndex = _settings.MatteMode == 1 ? 1 : 0;
+        TxtWhiteKeyRgb.Text = (_settings.WhiteKeyRgb & 0xFFFFFF).ToString("X6", inv);
+        TxtWhiteKeySimilarity.Text = _settings.WhiteKeySimilarity.ToString("0.###", inv);
+        TxtWhiteKeyBlend.Text = _settings.WhiteKeyBlend.ToString("0.###", inv);
+        ComboWhiteKeyDespill.SelectedIndex = Math.Clamp(_settings.WhiteKeyDespillMode, 0, 3);
+        TxtMattedStemSuffix.Text = _settings.MattedOutputStemSuffix ?? "";
+        TxtFinalStemSuffix.Text = _settings.FinalOutputStemSuffix ?? "";
         TxtErodeValue.Text = ((int)SliderErode.Value).ToString();
         TxtFinalWidth.Text = _settings.FinalExportWidth.ToString(inv);
         TxtFinalHeight.Text = _settings.FinalExportHeight.ToString(inv);
@@ -93,7 +112,7 @@ public partial class MainWindow : Window
             ? "00000000"
             : _settings.FinalBorderFillArgb.ToString("X8", inv);
         UpdateCustomModelPanel();
-        UpdateErodePanel();
+        UpdateMatteModePanel();
 
         _uiReady = true;
         RefreshWorkspaceUi(selectVideoIndex: _settings.SelectedVideoIndex);
@@ -118,11 +137,11 @@ public partial class MainWindow : Window
 
     void PushSettingsFromUi()
     {
+        var inv = CultureInfo.InvariantCulture;
         _settings.WorkspaceRoot = TxtWorkspace.Text.Trim();
         if (int.TryParse(TxtWidth.Text, out var w)) _settings.Width = w;
         if (int.TryParse(TxtHeight.Text, out var h)) _settings.Height = h;
-        if (double.TryParse(TxtFps.Text, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var fps))
+        if (double.TryParse(TxtFps.Text, System.Globalization.NumberStyles.Float, inv, out var fps))
             _settings.TargetFps = fps;
         _settings.MirrorHorizontally = ChkMirror.IsChecked == true;
         if (TryParseBorderInt(TxtBorderL.Text, out var bl)) _settings.BorderLeft = bl;
@@ -136,8 +155,24 @@ public partial class MainWindow : Window
         _settings.RembgCustomModelId = TxtCustomModel.Text ?? "";
         _settings.RembgAlphaMatting = ChkAlphaMatting.IsChecked == true;
         _settings.RembgAlphaErode = (int)SliderErode.Value;
+        if (int.TryParse(TxtRembgAf.Text, NumberStyles.Integer, inv, out var af) && af is >= 1 and <= 255)
+            _settings.RembgAlphaFg = af;
+        if (int.TryParse(TxtRembgAb.Text, NumberStyles.Integer, inv, out var ab) && ab is >= 0 and <= 255)
+            _settings.RembgAlphaBg = ab;
         _settings.RembgPostProcessMask = ChkPostProcess.IsChecked == true;
         _settings.RembgParallelJobs = ComboRembgParallel.SelectedIndex >= 0 ? ComboRembgParallel.SelectedIndex + 1 : 1;
+        _settings.MatteMode = ComboMatteMode.SelectedIndex == 1 ? 1 : 0;
+        if (TryParseRgbHex6(TxtWhiteKeyRgb.Text, out var wRgb))
+            _settings.WhiteKeyRgb = wRgb & 0xFFFFFF;
+        if (double.TryParse(TxtWhiteKeySimilarity.Text, NumberStyles.Float, inv, out var wSim) && wSim > 0 && wSim <= 1)
+            _settings.WhiteKeySimilarity = wSim;
+        if (double.TryParse(TxtWhiteKeyBlend.Text, NumberStyles.Float, inv, out var wBlend) && wBlend >= 0 && wBlend <= 1)
+            _settings.WhiteKeyBlend = wBlend;
+        _settings.WhiteKeyDespillMode = ComboWhiteKeyDespill.SelectedIndex >= 0
+            ? Math.Clamp(ComboWhiteKeyDespill.SelectedIndex, 0, 3)
+            : 0;
+        _settings.MattedOutputStemSuffix = TxtMattedStemSuffix.Text?.Trim() ?? "";
+        _settings.FinalOutputStemSuffix = TxtFinalStemSuffix.Text?.Trim() ?? "";
         if (int.TryParse(TxtFinalWidth.Text, out var fw)) _settings.FinalExportWidth = fw;
         if (int.TryParse(TxtFinalHeight.Text, out var fh)) _settings.FinalExportHeight = fh;
         _settings.FinalExportOutputFolder = string.IsNullOrWhiteSpace(TxtFinalOutputFolder.Text)
@@ -186,6 +221,22 @@ public partial class MainWindow : Window
         PanelCustomModel.Visibility = RembgModelCatalog.IsCustomPopupIndex(idx)
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    void ComboMatteMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady) return;
+        UpdateMatteModePanel();
+    }
+
+    void UpdateMatteModePanel()
+    {
+        var rembg = ComboMatteMode.SelectedIndex == 0;
+        PanelRembgDetails.Visibility = rembg ? Visibility.Visible : Visibility.Collapsed;
+        PanelWhiteKeyParams.Visibility = rembg ? Visibility.Collapsed : Visibility.Visible;
+        PanelRembgDetails.IsEnabled = rembg && !_uiBusy;
+        PanelWhiteKeyParams.IsEnabled = !rembg && !_uiBusy;
+        UpdateErodePanel();
     }
 
     void UpdateErodePanel()
@@ -421,6 +472,68 @@ public partial class MainWindow : Window
             MessageBoxImage.Information);
     }
 
+    async Task ExecuteMatteFrameToMattedAsync(string frameDir, string mattedDir, IProgress<string> progress)
+    {
+        if (ComboMatteMode.SelectedIndex == 1)
+        {
+            var ffmpeg = ResolveFfmpegPath();
+            if (ffmpeg == null)
+                throw new InvalidOperationException("未找到 ffmpeg.exe。");
+            if (!TryBuildWhiteKeyOptions(frameDir, mattedDir, out var wopt, out var err) || wopt == null)
+                throw new InvalidOperationException(err ?? "色键参数无效。");
+            await WhiteKeyMatteRunner.RunFolderAsync(ffmpeg, wopt, progress, cancellationToken: default)
+                .ConfigureAwait(true);
+        }
+        else
+        {
+            await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir), cancellationToken: default, progress)
+                .ConfigureAwait(true);
+        }
+    }
+
+    bool TryBuildWhiteKeyOptions(string frameDir, string mattedDir, out WhiteKeyMatteRunner.Options? opt,
+        out string? errorMessage)
+    {
+        opt = null;
+        var inv = CultureInfo.InvariantCulture;
+        if (!TryParseRgbHex6(TxtWhiteKeyRgb.Text, out var rgb))
+        {
+            errorMessage = "键控颜色须为 6 位 RRGGBB（可带 #），例如 FFFFFF。";
+            return false;
+        }
+
+        if (!double.TryParse(TxtWhiteKeySimilarity.Text, NumberStyles.Float, inv, out var sim) || sim <= 0 || sim > 1)
+        {
+            errorMessage = "similarity 须为小数，范围 (0, 1]，例如 0.08。";
+            return false;
+        }
+
+        if (!double.TryParse(TxtWhiteKeyBlend.Text, NumberStyles.Float, inv, out var blend) || blend < 0 || blend > 1)
+        {
+            errorMessage = "blend 须为小数，范围 [0, 1]，例如 0.04。";
+            return false;
+        }
+
+        opt = new WhiteKeyMatteRunner.Options
+        {
+            InputFolder = frameDir,
+            OutputFolder = mattedDir,
+            KeyR = (int)((rgb >> 16) & 255),
+            KeyG = (int)((rgb >> 8) & 255),
+            KeyB = (int)(rgb & 255),
+            Similarity = sim,
+            Blend = blend,
+            OutputStemSuffix = string.IsNullOrWhiteSpace(TxtMattedStemSuffix.Text)
+                ? null
+                : TxtMattedStemSuffix.Text.Trim(),
+            DespillMode = ComboWhiteKeyDespill.SelectedIndex >= 0
+                ? Math.Clamp(ComboWhiteKeyDespill.SelectedIndex, 0, 3)
+                : 0
+        };
+        errorMessage = null;
+        return true;
+    }
+
     RembgRunner.Options BuildRembgOptions(string frameDir, string mattedDir)
     {
         var jobs = ComboRembgParallel.SelectedIndex >= 0 ? ComboRembgParallel.SelectedIndex + 1 : 1;
@@ -432,8 +545,13 @@ public partial class MainWindow : Window
             Model = RembgModelCatalog.ResolveModelId(ComboModel.SelectedIndex, TxtCustomModel.Text),
             AlphaMatting = ChkAlphaMatting.IsChecked == true,
             AlphaMattingErodeSize = (int)SliderErode.Value,
+            AlphaMattingForegroundThreshold = ParseRembgAf(TxtRembgAf.Text, _settings.RembgAlphaFg),
+            AlphaMattingBackgroundThreshold = ParseRembgAb(TxtRembgAb.Text, _settings.RembgAlphaBg),
             PostProcessMask = ChkPostProcess.IsChecked == true,
-            ParallelJobs = jobs
+            ParallelJobs = jobs,
+            OutputStemSuffix = string.IsNullOrWhiteSpace(TxtMattedStemSuffix.Text)
+                ? null
+                : TxtMattedStemSuffix.Text.Trim()
         };
     }
 
@@ -544,13 +662,25 @@ public partial class MainWindow : Window
             return;
         }
 
+        string? finalStemSuffix;
+        try
+        {
+            finalStemSuffix = string.IsNullOrWhiteSpace(TxtFinalStemSuffix.Text) ? null : TxtFinalStemSuffix.Text.Trim();
+            RembgRunner.ValidateOutputStemSuffix(finalStemSuffix);
+        }
+        catch (InvalidOperationException ex)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         SetBusy(true);
         try
         {
             var progress = new Progress<string>(s =>
                 Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
             var n = await MattedFinalExporter.ExportFolderAsync(ffmpeg, mattedDir, finalDir, fw, fh,
-                    fbL, fbR, fbT, fbB, fbFillArgb, progress)
+                    fbL, fbR, fbT, fbB, fbFillArgb, finalStemSuffix, progress)
                 .ConfigureAwait(true);
             System.Windows.MessageBox.Show($"已将 {n} 张图导出到：\n{finalDir}", "完成", MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -634,6 +764,37 @@ public partial class MainWindow : Window
         var frameDir = WorkspaceLayout.FrameDir(root);
         var mattedDir = WorkspaceLayout.MattedDir(root);
 
+        if (matteAfter)
+        {
+            try
+            {
+                var ms = string.IsNullOrWhiteSpace(TxtMattedStemSuffix.Text) ? null : TxtMattedStemSuffix.Text.Trim();
+                RembgRunner.ValidateOutputStemSuffix(ms);
+            }
+            catch (InvalidOperationException ex)
+            {
+                System.Windows.MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (ComboMatteMode.SelectedIndex == 1)
+            {
+                if (ResolveFfmpegPath() == null)
+                {
+                    System.Windows.MessageBox.Show("纯色底色键模式需要 ffmpeg.exe。", "提示", MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (!TryBuildWhiteKeyOptions(frameDir, mattedDir, out _, out var wkErr))
+                {
+                    System.Windows.MessageBox.Show(wkErr ?? "色键参数无效。", "提示", MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+            }
+        }
+
         SetBusy(true);
         try
         {
@@ -647,10 +808,9 @@ public partial class MainWindow : Window
             if (matteAfter)
             {
                 TxtStatus.Text = "正在抠图…";
-                var rembgProgress = new Progress<string>(s =>
+                var matteProgress = new Progress<string>(s =>
                     Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
-                await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir),
-                    cancellationToken: default, rembgProgress);
+                await ExecuteMatteFrameToMattedAsync(frameDir, mattedDir, matteProgress).ConfigureAwait(true);
                 System.Windows.MessageBox.Show($"已导出 {count} 张到 Frame，并完成抠图到 Matted。", "完成",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -694,14 +854,41 @@ public partial class MainWindow : Window
             return;
         }
 
+        try
+        {
+            var ms = string.IsNullOrWhiteSpace(TxtMattedStemSuffix.Text) ? null : TxtMattedStemSuffix.Text.Trim();
+            RembgRunner.ValidateOutputStemSuffix(ms);
+        }
+        catch (InvalidOperationException ex)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (ComboMatteMode.SelectedIndex == 1)
+        {
+            if (ResolveFfmpegPath() == null)
+            {
+                System.Windows.MessageBox.Show("纯色底色键模式需要 ffmpeg.exe。", "提示", MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!TryBuildWhiteKeyOptions(frameDir, mattedDir, out _, out var wkErr))
+            {
+                System.Windows.MessageBox.Show(wkErr ?? "色键参数无效。", "提示", MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+        }
+
         SetBusy(true);
         try
         {
             TxtStatus.Text = "正在抠图…";
-            var rembgProgress = new Progress<string>(s =>
+            var matteProgress = new Progress<string>(s =>
                 Dispatcher.BeginInvoke(() => TxtStatus.Text = s));
-            await RembgRunner.RunFolderAsync(BuildRembgOptions(frameDir, mattedDir),
-                cancellationToken: default, rembgProgress);
+            await ExecuteMatteFrameToMattedAsync(frameDir, mattedDir, matteProgress).ConfigureAwait(true);
             System.Windows.MessageBox.Show("已从 Frame 抠图并写入 Matted。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -749,6 +936,13 @@ public partial class MainWindow : Window
         ChkAlphaMatting.IsEnabled = !busy;
         ChkPostProcess.IsEnabled = !busy;
         ComboRembgParallel.IsEnabled = !busy;
+        ComboMatteMode.IsEnabled = !busy;
+        TxtWhiteKeyRgb.IsEnabled = !busy;
+        TxtWhiteKeySimilarity.IsEnabled = !busy;
+        TxtWhiteKeyBlend.IsEnabled = !busy;
+        ComboWhiteKeyDespill.IsEnabled = !busy;
+        TxtMattedStemSuffix.IsEnabled = !busy;
+        TxtFinalStemSuffix.IsEnabled = !busy;
         TxtFinalWidth.IsEnabled = !busy;
         TxtFinalHeight.IsEnabled = !busy;
         TxtFinalOutputFolder.IsEnabled = !busy;
@@ -760,7 +954,40 @@ public partial class MainWindow : Window
         TxtFinalBorderFillArgb.IsEnabled = !busy;
         BtnDownloadFfmpeg.IsEnabled = !busy && ResolveFfmpegPath() == null;
         BtnWingetFfmpeg.IsEnabled = !busy && FfmpegInstaller.FindWingetPath() != null;
-        UpdateErodePanel();
+        UpdateMatteModePanel();
+    }
+
+    /// <summary>解析 6 位 RRGGBB（可带 #），不含 Alpha。</summary>
+    static bool TryParseRgbHex6(string? s, out uint rgb)
+    {
+        rgb = 0;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var t = s.Trim();
+        if (t.StartsWith('#')) t = t[1..];
+        if (t.Length != 6)
+            return false;
+        if (!uint.TryParse(t, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var v))
+            return false;
+        if (v > 0xFFFFFF)
+            return false;
+        rgb = v;
+        return true;
+    }
+
+    static int ParseRembgAf(string? text, int fallback)
+    {
+        if (int.TryParse(text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) &&
+            v is >= 1 and <= 255)
+            return v;
+        return Math.Clamp(fallback, 1, 255);
+    }
+
+    static int ParseRembgAb(string? text, int fallback)
+    {
+        if (int.TryParse(text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) &&
+            v is >= 0 and <= 255)
+            return v;
+        return Math.Clamp(fallback, 0, 255);
     }
 
     static bool TryParseBorderInt(string? s, out int v)
